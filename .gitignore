@@ -1,0 +1,4 @@
+stcu-tkgc/
+venv/
+__pycache__/
+*.pyc
