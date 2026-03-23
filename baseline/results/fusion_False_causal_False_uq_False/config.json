@@ -1,0 +1,15 @@
+{
+    "hidden_dim": 128,
+    "epochs": 100,
+    "snapshots_used": 20,
+    "lr": 0.001,
+    "batch_size": 512,
+    "early_stopping_patience": 5,
+    "use_fusion": false,
+    "use_causal": false,
+    "use_uncertainty": false,
+    "num_envs": 3,
+    "lambda_inv": 0.1,
+    "num_entities": 12482,
+    "num_relations": 258
+}
