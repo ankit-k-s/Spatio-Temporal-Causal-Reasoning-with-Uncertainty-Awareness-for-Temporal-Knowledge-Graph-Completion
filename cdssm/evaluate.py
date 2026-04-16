@@ -20,20 +20,22 @@ def build_filter_dict(loader):
                 filter_dict[(h, r, tau)].add(t)
     return filter_dict
 
-def evaluate_model():
-    print("\n" + "="*50)
-    print("CD-SSM PHASE 1 EVALUATION")
-    print("="*50)
+def evaluate_phase1():
+    print("\n" + "="*60)
+    print("CD-SSM PHASE 1 SOTA EVALUATION (STRICT FORECASTING)")
+    print("="*60)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Evaluating on device: {device}")
 
     # 1. Load Data & Filter
     loader = TKGDataloader(data_dir="data/ICEWS14")
     filter_dict = build_filter_dict(loader)
     
+    # --- CHAMPION HYPERPARAMS (RESTORED) ---
     N = loader.num_entities
-    D, D_STATE = 200, 16
+    D = 200        
+    D_STATE = 16   
+    print(f"Evaluating on device: {device} | D={D} | D_STATE={D_STATE}")
 
     # 2. Instantiate Architecture
     emb_layer = TKGEmbedding(N, loader.num_relations_total, len(loader.time2id), D).to(device)
@@ -50,84 +52,84 @@ def evaluate_model():
         temporal_layer.load_state_dict(checkpoint['temporal_layer'])
         decomposer.load_state_dict(checkpoint['decomposer'])
         predictor.load_state_dict(checkpoint['predictor'])
-        print("✅ Checkpoint loaded successfully.")
+        print("✅ D=200 Checkpoint loaded successfully.")
     except FileNotFoundError:
-        print("❌ Error: 'checkpoints/cdssm_phase1.pt' not found. Run train.py first!")
+        print("❌ Error: 'checkpoints/cdssm_phase1.pt' not found!")
         return
 
     # Set to eval mode
-    modules = [emb_layer, spatial_layer, temporal_layer, decomposer, predictor]
-    for m in modules: m.eval()
+    for m in [emb_layer, spatial_layer, temporal_layer, decomposer, predictor]: m.eval()
 
     with torch.no_grad():
-        # 4. WARMUP: Roll temporal memory through the training set
-        print("\n[Phase 1] Rolling Temporal Memory (Warmup)...")
+        # 4. WARMUP: Roll temporal memory through Train + Valid
+        print("\n[1] Rolling Temporal Memory (Warmup)...")
         states, prev_xs = None, None
+        warmup_times = sorted(list(loader.train_snapshots.keys()) + list(loader.valid_snapshots.keys()))
+        all_snapshots = {**loader.train_snapshots, **loader.valid_snapshots, **loader.test_snapshots}
         
-        for tau in sorted(loader.train_snapshots.keys()):
-            edge_index, edge_type, time_id = loader.train_snapshots[tau]
+        H_prev = torch.zeros(N, D).to(device)
+        
+        for tau in warmup_times:
+            edge_index, edge_type, time_id = all_snapshots[tau]
             edge_index, edge_type = edge_index.to(device), edge_type.to(device)
+            time_tensor = torch.tensor([time_id], dtype=torch.long, device=device)
             
-            x_t_base = emb_layer.get_all_entity_embeddings(time_id).squeeze(0)
+            x_t_base = emb_layer.get_all_entity_embeddings(time_tensor).squeeze(0)
             x_t_spatial = spatial_layer(x_t_base, edge_index, edge_type, emb_layer.rel_emb)
-            _, states, prev_xs = temporal_layer(x_t_spatial, states, prev_xs)
+            H_prev, states, prev_xs = temporal_layer(x_t_spatial, states, prev_xs)
 
-        # 5. EVALUATION: Calculate metrics on Validation Set
-        print("\n[Phase 2] Evaluating Validation Set...")
+        # 5. EVALUATION: Calculate metrics on Test Set
+        print("\n[2] Evaluating Test Set (Strict Forecasting)...")
         mrr, hits_1, hits_3, hits_10, total_queries = 0.0, 0.0, 0.0, 0.0, 0
         
-        valid_times = sorted(loader.valid_snapshots.keys())
-        for tau in tqdm(valid_times, desc="Validation"):
-            edge_index, edge_type, time_id = loader.valid_snapshots[tau]
+        test_times = sorted(loader.test_snapshots.keys())
+        for tau in tqdm(test_times, desc="Testing"):
+            edge_index, edge_type, time_id = loader.test_snapshots[tau]
             edge_index, edge_type = edge_index.to(device), edge_type.to(device)
+            time_tensor = torch.tensor([time_id], dtype=torch.long, device=device)
             
-            # Forward pass
-            x_t_base = emb_layer.get_all_entity_embeddings(time_id).squeeze(0)
-            x_t_spatial = spatial_layer(x_t_base, edge_index, edge_type, emb_layer.rel_emb)
-            H_t, states, prev_xs = temporal_layer(x_t_spatial, states, prev_xs)
-            
-            # Predict
             subjects, objects, relations = edge_index[0], edge_index[1], edge_type
-            subj_states = H_t[subjects]
+            
+            # --- 1. PREDICT USING YESTERDAY'S MEMORY (H_prev) ---
+            subj_states = H_prev[subjects]
             rel_embeddings = emb_layer.rel_emb(relations)
             
-            # We ONLY evaluate the causal branch (h_c) during inference
-            h_c, _, _ = decomposer(subj_states, rel_embeddings)
-            scores = predictor(h_c, rel_embeddings, H_t) # [Batch, N]
+            # Use the exact Do-Intervention logic from your Hybrid script
+            h_c, h_s, _ = decomposer(subj_states, rel_embeddings)
+            h_do = h_c + decomposer.intervene(h_s)
+            scores = predictor(h_do, rel_embeddings, H_prev) 
             
-            # Filtered Evaluation Protocol
+            # --- 2. FILTER & SCORE ---
             for i in range(len(subjects)):
                 h, r, true_tail = subjects[i].item(), relations[i].item(), objects[i].item()
-                
-                # Get all valid answers for this query
                 valid_tails = filter_dict[(h, r, tau)]
-                
-                # Mask all valid tails EXCEPT the current true target
                 mask_idx = [t for t in valid_tails if t != true_tail]
                 if mask_idx:
-                    scores[i, mask_idx] = -1e9
+                    scores[i, mask_idx] = -1e6 # Safe masking
             
-            # Calculate Ranks
-            # argsort(descending=True) gives indices of highest scores first
             sorted_indices = scores.argsort(dim=-1, descending=True)
             ranks = (sorted_indices == objects.unsqueeze(1)).nonzero(as_tuple=True)[1] + 1.0
             
-            # Accumulate Metrics
             mrr += (1.0 / ranks).sum().item()
             hits_1 += (ranks <= 1).sum().item()
             hits_3 += (ranks <= 3).sum().item()
             hits_10 += (ranks <= 10).sum().item()
             total_queries += len(subjects)
 
-        # Print Final Results
+            # --- 3. UPDATE MEMORY WITH TODAY'S FACTS ---
+            x_t_base = emb_layer.get_all_entity_embeddings(time_tensor).squeeze(0)
+            x_t_spatial = spatial_layer(x_t_base, edge_index, edge_type, emb_layer.rel_emb)
+            H_prev, states, prev_xs = temporal_layer(x_t_spatial, states, prev_xs)
+
         print("\n" + "="*40)
-        print("====== EVALUATION RESULTS ======")
-        print("="*40)
-        print(f"Filtered MRR : {mrr / total_queries:.4f}")
-        print(f"Hits@1       : {hits_1 / total_queries:.4f}")
-        print(f"Hits@3       : {hits_3 / total_queries:.4f}")
-        print(f"Hits@10      : {hits_10 / total_queries:.4f}")
+        print("====== PHASE 1 RESULTS (D=200 + Margin Loss) ======")
+        print(f"Target Baseline : ~0.2227")
+        print("-" * 40)
+        print(f"Filtered MRR    : {mrr / total_queries:.4f}")
+        print(f"Hits@1          : {hits_1 / total_queries:.4f}")
+        print(f"Hits@3          : {hits_3 / total_queries:.4f}")
+        print(f"Hits@10         : {hits_10 / total_queries:.4f}")
         print("="*40 + "\n")
 
 if __name__ == "__main__":
-    evaluate_model()
+    evaluate_phase1()

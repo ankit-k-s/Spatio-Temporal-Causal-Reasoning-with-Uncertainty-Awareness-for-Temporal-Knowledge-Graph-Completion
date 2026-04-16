@@ -12,7 +12,7 @@ from models.predictor import TKGCFusingPredictor
 from core.loss import QuadObjectiveLoss
 
 def train_phase_1():
-    print("Initializing CD-SSM Phase 1 Training...")
+    print("Initializing CD-SSM Phase 1 Training (Rolling back to D=200 Champion)...")
     
     loader = TKGDataloader(data_dir="data/ICEWS14")
     N = loader.num_entities
@@ -23,13 +23,14 @@ def train_phase_1():
         print(" Error: Dataset failed to load. Check your 'data/ICEWS14' path.")
         return
 
-    D = 200
-    D_STATE = 16
-    LR = 1e-3
-    EPOCHS = 1 # Keep at 1 for CPU test, change to 100 on H100
+    # --- CHAMPION HYPERPARAMS (RESTORED) ---
+    D = 200                
+    D_STATE = 16           
+    LR = 5e-4              
+    EPOCHS = 100
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Training on device: {device}")
+    print(f"Training on device: {device} | D={D} | D_STATE={D_STATE}")
 
     emb_layer = TKGEmbedding(N, NUM_REL, NUM_TIME, D).to(device)
     spatial_layer = GraphMambaLayer(d_model=D, seq_len=3).to(device)
