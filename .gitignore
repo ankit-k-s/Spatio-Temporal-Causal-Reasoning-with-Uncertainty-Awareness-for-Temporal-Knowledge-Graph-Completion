@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual env
+stcu-tkgc/
+venv/
+
+# Model checkpoints
+*.pt
+checkpoints/
+
+# Results (optional)
+results/*.pt
+
+# OS
+.DS_Store
+Thumbs.db

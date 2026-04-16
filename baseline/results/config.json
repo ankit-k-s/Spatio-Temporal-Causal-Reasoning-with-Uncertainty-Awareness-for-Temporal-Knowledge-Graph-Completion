@@ -1,0 +1,10 @@
+{
+    "hidden_dim": 128,
+    "epochs": 100,
+    "snapshots_used": 20,
+    "lr": 0.001,
+    "batch_size": 512,
+    "early_stopping_patience": 5,
+    "num_envs": 3,
+    "lambda_inv": 0.1
+}
