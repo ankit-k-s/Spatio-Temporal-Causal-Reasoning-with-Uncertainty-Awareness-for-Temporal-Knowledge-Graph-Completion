@@ -57,7 +57,7 @@ def evaluate_phase2_guided():
         predictor.load_state_dict(checkpoint['predictor'])
         denoiser.load_state_dict(checkpoint['denoiser'])
     except FileNotFoundError:
-        print("❌ Error: checkpoints/cdssm_phase2.pt not found!")
+        print(" Error: checkpoints/cdssm_phase2.pt not found!")
         return
 
     for m in [emb_layer, spatial_layer, temporal_layer, decomposer, predictor, denoiser]: m.eval()

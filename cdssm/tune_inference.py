@@ -29,7 +29,7 @@ def tune_inference():
     print("CD-SSM TRACK 2: FIXED INFERENCE (STABLE)")
     print("="*60)
 
-    # 🔧 CLEAN GRID (based on prior results)
+    #  CLEAN GRID (based on prior results)
     guidance_steps = [20, 25]
     k_samples = [5, 10]
 
@@ -123,7 +123,7 @@ def tune_inference():
 
                 print(f"\n--- K={K}, Guidance={G_STEP} ---")
 
-                # 🔧 FIX: deep copy states
+                #  FIX: deep copy states
                 run_states = copy.deepcopy(states)
                 run_prev_xs = copy.deepcopy(prev_xs)
                 run_H_prev = H_prev.clone()
@@ -159,18 +159,18 @@ def tune_inference():
 
                     hc_pred = denoiser(hc_noisy, rel_emb_k, s_T_k, t_emb_k, m_k)
 
-                    # 🔧 FIX: NaN safety
+                    #  FIX: NaN safety
                     hc_pred = torch.nan_to_num(hc_pred, nan=0.0, posinf=1.0, neginf=-1.0)
 
                     scores_k = predictor(hc_pred, rel_emb_k, run_H_prev)
 
-                    # 🔧 CRITICAL FIX: reshape instead of view
+                    #  CRITICAL FIX: reshape instead of view
                     assert scores_k.shape[0] == batch_size * K
                     scores_k = scores_k.reshape(batch_size, K, N)
 
                     scores = scores_k.mean(dim=1)
 
-                    # 🔧 safer masking
+                    #  safer masking
                     for i in range(batch_size):
                         h = subjects[i].item()
                         r = relations[i].item()

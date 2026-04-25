@@ -129,7 +129,7 @@ def train_calibrated():
         'denoiser': denoiser.state_dict(),
         'confidence_head': confidence_head.state_dict()
     }, "checkpoints/cdssm_calibrated.pt")
-    print("✅ Saved to checkpoints/cdssm_calibrated.pt")
+    print(" Saved to checkpoints/cdssm_calibrated.pt")
 
 if __name__ == "__main__":
     train_calibrated()

@@ -89,14 +89,14 @@ def evaluate_hybrid_sota():
             rel_embeddings = emb_layer.rel_emb(relations)
             
             # ==================================================
-            # 🧠 1. THE DETERMINISTIC SCORING (Phase 1 Logic)
+            #  1. THE DETERMINISTIC SCORING (Phase 1 Logic)
             # ==================================================
             h_c, h_s, _ = decomposer(subj_states, rel_embeddings)
             h_do = h_c + decomposer.intervene(h_s) 
             scores_det = predictor(h_do, rel_embeddings, H_prev) # [Batch, N]
 
             # ==================================================
-            # 🌪️ 2. THE DIFFUSION ENSEMBLE SCORING (Phase 2 Logic)
+            #  2. THE DIFFUSION ENSEMBLE SCORING (Phase 2 Logic)
             # ==================================================
             h_c_k = h_c.repeat_interleave(K_SAMPLES, dim=0) 
             rel_emb_k = rel_embeddings.repeat_interleave(K_SAMPLES, dim=0)
@@ -111,7 +111,7 @@ def evaluate_hybrid_sota():
             scores_diff = scores_diff_k.view(batch_size, K_SAMPLES, N).mean(dim=1) # [Batch, N]
 
             # ==================================================
-            # 🤝 3. THE HYBRID MERGE
+            #  3. THE HYBRID MERGE
             # ==================================================
             scores_final = (ALPHA * scores_det) + ((1.0 - ALPHA) * scores_diff)
 

@@ -25,7 +25,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # ========================
 train_data = load_data(train_path)
 
-# 🔥 reduce for testing (remove later)
+#  reduce for testing (remove later)
 train_data = train_data[:10000]
 
 num_entities, num_relations = get_stats(train_data)
