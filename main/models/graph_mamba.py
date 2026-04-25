@@ -1,92 +1,111 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 # =========================
-# Pure PyTorch scatter
+# SCATTER MEAN
 # =========================
-def scatter_mean(src, index, dim_size):
-    out = torch.zeros(dim_size, src.size(1), device=src.device)
-    count = torch.zeros(dim_size, device=src.device)
+def scatter_mean(src, index, dim_size, weight=None):
+    out = torch.zeros(dim_size, src.size(1), device=src.device, dtype=src.dtype)
+    count = torch.zeros(dim_size, device=src.device, dtype=src.dtype)
+
+    if weight is not None:
+        weight = weight.to(src.dtype)
+        src = src * weight.unsqueeze(-1)
 
     out.index_add_(0, index, src)
-    count.index_add_(0, index, torch.ones_like(index, dtype=torch.float))
+
+    if weight is None:
+        count.index_add_(0, index, torch.ones_like(index, dtype=src.dtype))
+    else:
+        count.index_add_(0, index, weight)
 
     count = count.clamp(min=1).unsqueeze(1)
     return out / count
 
 
 # =========================
-# Graph Mamba Layer
+# MAMBA LAYER (SAFE, NO INPLACE)
 # =========================
-class GraphMambaLayer(nn.Module):
+class MambaLayer(nn.Module):
     def __init__(self, dim):
         super().__init__()
 
-        self.attn = nn.MultiheadAttention(dim, num_heads=4, batch_first=True)
+        self.in_proj = nn.Linear(dim, dim * 2)
+        self.out_proj = nn.Linear(dim, dim)
+
+        self.A = nn.Parameter(torch.randn(dim) * 0.1)
+        self.B = nn.Parameter(torch.randn(dim) * 0.1)
+
         self.norm = nn.LayerNorm(dim)
 
-        self.ffn = nn.Sequential(
-            nn.Linear(dim, dim),
-            nn.ReLU(),
-            nn.Linear(dim, dim)
-        )
-
     def forward(self, x):
-        h = x.unsqueeze(0)  # (1, N, D)
-        h, _ = self.attn(h, h, h)
-        h = h.squeeze(0)
+        # x: (N, D)
 
-        x = x + h
-        x = x + self.ffn(x)
+        z, g = self.in_proj(x).chunk(2, dim=-1)
+        g = torch.sigmoid(g)
 
-        return self.norm(x)
+        # SAFE recurrence (NO inplace ops)
+        h_list = []
+        prev = torch.zeros_like(z[0])
+
+        for i in range(z.size(0)):
+            curr = g[i] * (self.A * prev) + self.B * z[i]
+            h_list.append(curr)
+            prev = curr
+
+        h = torch.stack(h_list, dim=0)
+
+        out = self.out_proj(h)
+
+        return self.norm(x + out)
 
 
 # =========================
-# Graph Mamba (CSI READY)
+# GRAPH MAMBA
 # =========================
 class GraphMamba(nn.Module):
     def __init__(self, num_entities, num_relations, num_timestamps, dim, num_layers=2):
         super().__init__()
+
+        self.num_entities = num_entities
 
         self.entity_emb = nn.Embedding(num_entities, dim)
         self.rel_emb = nn.Embedding(num_relations, dim)
         self.time_emb = nn.Embedding(num_timestamps, dim)
 
         self.layers = nn.ModuleList([
-            GraphMambaLayer(dim) for _ in range(num_layers)
+            MambaLayer(dim) for _ in range(num_layers)
         ])
 
     def forward(self, edge_index, edge_type, edge_time, edge_weight=None):
         src, dst = edge_index
 
+        # =========================
+        # EMBEDDINGS
+        # =========================
         h_s = self.entity_emb(src)
         h_r = self.rel_emb(edge_type)
         h_t = self.time_emb(edge_time)
 
-        # ------------------------
-        # MESSAGE
-        # ------------------------
-        messages = h_s + h_r + h_t  # (E, D)
+        # =========================
+        # MESSAGE PASSING
+        # =========================
+        messages = h_s + h_r + h_t
 
-        # ------------------------
-        # APPLY CSI MASK HERE 
-        # ------------------------
-        if edge_weight is None:
-            edge_weight = torch.ones(messages.size(0), device=messages.device)
+        x = scatter_mean(messages, dst, self.num_entities, weight=edge_weight)
 
-        messages = messages * edge_weight.unsqueeze(-1)
+        # normalize for stability
+        x = F.normalize(x, dim=1)
 
-        # ------------------------
-        # AGGREGATION
-        # ------------------------
-        num_nodes = self.entity_emb.num_embeddings
-        x = scatter_mean(messages, dst, num_nodes)
+        # pseudo ordering (important for sequence modeling)
+        perm = torch.randperm(x.size(0), device=x.device)
+        x = x[perm]
 
-        # ------------------------
+        # =========================
         # MAMBA LAYERS
-        # ------------------------
+        # =========================
         for layer in self.layers:
             x = layer(x)
 

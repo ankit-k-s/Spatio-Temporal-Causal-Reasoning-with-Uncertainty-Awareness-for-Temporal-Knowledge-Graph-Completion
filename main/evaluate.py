@@ -1,58 +1,109 @@
 import torch
+import time
+from tqdm import tqdm
 
 from models.graph_mamba import GraphMamba
+from models.temporal_encoder import TemporalEncoder
 from models.csi_full import CSIFull
-from data.toy_dataset import ToyTemporalKG
+from data.icews_loader import ICEWS14Dataset
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def evaluate(model, dataset, k_list=[1, 3, 10]):
+def evaluate(model, dataset, num_samples=2000):
     model.eval()
 
     edge_index = dataset.edge_index.to(device)
     edge_type = dataset.edge_type.to(device)
     edge_time = dataset.edge_time.to(device)
 
+    # =========================
+    # SAMPLE TEST TRIPLES
+    # =========================
+    test_triples = dataset.test_triples[:num_samples]
+
+    print(f"Using {len(test_triples)} test triples")
+
     ranks = []
 
+    start_time = time.time()
+
     with torch.no_grad():
-        for i in range(edge_index.size(1)):
 
-            h = edge_index[0, i]
-            t = edge_index[1, i]
-            r = edge_type[i]
+        # =========================
+        # GROUP BY RELATION (IMPORTANT)
+        # =========================
+        rel_groups = {}
+        for h, r, t, ts in test_triples:
+            if r not in rel_groups:
+                rel_groups[r] = []
+            rel_groups[r].append((h, t, ts))
 
-            #  Query-specific forward (VERY IMPORTANT)
+        print(f"Total relations: {len(rel_groups)}")
+
+        # =========================
+        # LOOP PER RELATION
+        # =========================
+        for r in tqdm(rel_groups.keys(), desc="Evaluating (tail only)"):
+
+            query_rel = torch.tensor(r, device=device)
+
+            # FULL MODEL FORWARD (IMPORTANT)
             pc, _, _, _, _ = model(
                 edge_index,
                 edge_type,
                 edge_time,
-                query_rel=r
+                query_rel=query_rel
             )
 
-            scores = pc[h]
+            triples = rel_groups[r]
 
-            _, indices = torch.sort(scores, descending=True)
+            for h, t, ts in triples:
 
-            rank = (indices == t).nonzero(as_tuple=True)[0].item() + 1
-            ranks.append(rank)
+                scores = pc[h].clone()
 
-    ranks = torch.tensor(ranks).float()
+                # =========================
+                # FILTERING (CRITICAL)
+                # =========================
+                key = (h, r, ts)
+                if key in dataset.filter_dict:
+                    for t_filt in dataset.filter_dict[key]:
+                        if t_filt != t:
+                            scores[t_filt] = -1e9
+
+                # =========================
+                # RANK
+                # =========================
+                _, indices = torch.sort(scores, descending=True)
+                rank = (indices == t).nonzero(as_tuple=True)[0].item() + 1
+
+                ranks.append(rank)
 
     # =========================
     # METRICS
     # =========================
-    mrr = torch.mean(1.0 / ranks)
+    ranks = torch.tensor(ranks).float()
 
-    hits = {}
-    for k in k_list:
-        hits[k] = torch.mean((ranks <= k).float())
+    mrr = torch.mean(1.0 / ranks).item()
+    hits1 = torch.mean((ranks <= 1).float()).item()
+    hits3 = torch.mean((ranks <= 3).float()).item()
+    hits10 = torch.mean((ranks <= 10).float()).item()
 
-    print(f"\nEvaluation Results:")
+    total_time = time.time() - start_time
+
+    print("\n===== FINAL RESULTS (TAIL PREDICTION) =====")
     print(f"MRR: {mrr:.4f}")
-    for k in k_list:
-        print(f"Hits@{k}: {hits[k]:.4f}")
+    print(f"Hits@1: {hits1:.4f}")
+    print(f"Hits@3: {hits3:.4f}")
+    print(f"Hits@10: {hits10:.4f}")
+    print(f"Time taken: {total_time/60:.2f} minutes")
+
+    return {
+        "MRR": mrr,
+        "Hits@1": hits1,
+        "Hits@3": hits3,
+        "Hits@10": hits10
+    }
 
 
 # =========================
@@ -60,27 +111,40 @@ def evaluate(model, dataset, k_list=[1, 3, 10]):
 # =========================
 if __name__ == "__main__":
 
-    dataset = ToyTemporalKG()
+    dataset = ICEWS14Dataset("data")
 
-    dim = 64
+    dim = 128
 
-    encoder_c = GraphMamba(
+    # BASE ENCODERS
+    base_c = GraphMamba(
         dataset.num_entities,
         dataset.num_relations,
         dataset.num_timestamps,
         dim
     ).to(device)
 
-    encoder_s = GraphMamba(
+    base_s = GraphMamba(
         dataset.num_entities,
         dataset.num_relations,
         dataset.num_timestamps,
         dim
     ).to(device)
 
-    model = CSIFull(encoder_c, encoder_s, dataset.num_entities, dim).to(device)
+    # TEMPORAL ENCODERS
+    encoder_c = TemporalEncoder(base_c, dim).to(device)
+    encoder_s = TemporalEncoder(base_s, dim).to(device)
 
-    #  LOAD TRAINED MODEL
-    model.load_state_dict(torch.load("csi_model.pt", map_location=device))
+    # MODEL
+    model = CSIFull(
+        encoder_c,
+        encoder_s,
+        base_c,
+        base_s,
+        dataset.num_entities,
+        dim
+    ).to(device)
 
-    evaluate(model, dataset)
+    # LOAD WEIGHTS
+    model.load_state_dict(torch.load("best_icews_model.pt", map_location=device))
+
+    evaluate(model, dataset, num_samples=2000)

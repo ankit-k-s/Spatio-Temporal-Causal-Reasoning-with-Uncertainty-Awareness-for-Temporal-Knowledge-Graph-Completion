@@ -4,24 +4,17 @@ from models.ssm import DiagonalSISOCell
 
 
 class GraphSSM(nn.Module):
-    def __init__(self, dim, d_state=16):
+    def __init__(self, dim, d_state=8):
         super().__init__()
 
-        self.cell = DiagonalSISOCell(d_state=d_state, d_input=dim)
+        self.cell = DiagonalSISOCell(d_state, dim)
 
-    def forward(self, node_embeddings_seq):
+    def forward(self, sequence):
         state = None
         outputs = []
 
-        for x_t in node_embeddings_seq:
-            out = self.cell(x_t, state)  # (N, D, d_state)
-
-            # Reduce state dimension → (N, D)
-            out = out.mean(dim=-1)
-
-            # Update state
-            state = out.unsqueeze(-1).repeat(1, 1, self.cell.d_state)
-
+        for x in sequence:
+            out, state = self.cell(x, state)
             outputs.append(out)
 
-        return torch.stack(outputs, dim=0)
+        return torch.stack(outputs)

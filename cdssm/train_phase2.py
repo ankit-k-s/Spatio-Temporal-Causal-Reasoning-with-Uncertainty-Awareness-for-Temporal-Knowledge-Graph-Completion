@@ -61,7 +61,7 @@ def train_phase_2():
         dropout=DENOISER_DROPOUT
     ).to(device)
 
-    # 🔥 FIX: Phase 2 ONLY needs standard Cross Entropy to train the denoiser
+    #  FIX: Phase 2 ONLY needs standard Cross Entropy to train the denoiser
     loss_fn = nn.CrossEntropyLoss().to(device)
 
     # -------------------------
@@ -76,14 +76,14 @@ def train_phase_2():
         decomposer.load_state_dict(checkpoint['decomposer'])
         predictor.load_state_dict(checkpoint['predictor'])
 
-        print("✅ Phase 1 checkpoint loaded (D=200)")
+        print(" Phase 1 checkpoint loaded (D=200)")
 
     except FileNotFoundError:
         print("ERROR: Phase 1 checkpoint missing. Run Phase 1 with D=200 first.")
         return
 
     # -------------------------
-    # 🔥 FIX: TRUE PHASE 1 FREEZING
+    #  FIX: TRUE PHASE 1 FREEZING
     # -------------------------
     # 1. Put all Phase 1 modules in evaluation mode and turn off gradients
     for m in [emb_layer, spatial_layer, temporal_layer, decomposer, predictor]:
@@ -207,7 +207,7 @@ def train_phase_2():
 
     torch.save(checkpoint, "checkpoints/cdssm_phase2.pt")
 
-    print("✅ Saved to checkpoints/cdssm_phase2.pt")
+    print(" Saved to checkpoints/cdssm_phase2.pt")
 
 
 if __name__ == "__main__":

@@ -52,9 +52,9 @@ def evaluate_phase1():
         temporal_layer.load_state_dict(checkpoint['temporal_layer'])
         decomposer.load_state_dict(checkpoint['decomposer'])
         predictor.load_state_dict(checkpoint['predictor'])
-        print("✅ D=200 Checkpoint loaded successfully.")
+        print(" D=200 Checkpoint loaded successfully.")
     except FileNotFoundError:
-        print("❌ Error: 'checkpoints/cdssm_phase1.pt' not found!")
+        print(" Error: 'checkpoints/cdssm_phase1.pt' not found!")
         return
 
     # Set to eval mode

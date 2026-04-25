@@ -5,7 +5,7 @@ from models.graph_mamba import GraphMamba
 from models.csi_full import CSIFull, ranking_loss
 from data.toy_dataset import ToyTemporalKG
 from utils.negative_sampling import sample_negatives
-
+torch.backends.cudnn.benchmark = True
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # =========================
@@ -39,14 +39,14 @@ optimizer = optim.Adam(model.parameters(), lr=5e-4)
 # =========================
 # TRAIN LOOP
 # =========================
-epochs = 10
-batch_size = 64
-num_neg = 10
+batch_size = 512        # was 64
+num_neg = 64            # was 10
+epochs = 50             # was 10
 
 edge_index = dataset.edge_index.to(device)
 edge_type = dataset.edge_type.to(device)
 edge_time = dataset.edge_time.to(device)
-
+best_loss = float("inf")
 for epoch in range(epochs):
     model.train()
 
@@ -111,6 +111,10 @@ for epoch in range(epochs):
     optimizer.step()
 
     # SAVE MODEL
-    torch.save(model.state_dict(), "csi_model.pt")
-
     print(f"Epoch {epoch} | Loss: {loss.item():.4f}")
+    if loss.item() < best_loss:
+        best_loss = loss.item()
+        torch.save(model.state_dict(), "best_model.pt")
+        print("Best model saved!")
+
+    
