@@ -3,7 +3,7 @@
 # CD-SSM: Causal Diffusion with State Space Model Denoising for Temporal Knowledge Graph Extrapolation
 
 ##  Quick Links
-* **Project Report (Overleaf):** [(https://www.overleaf.com/project/69f7110215ec0fd04c664323)]
+* **Project Report (Overleaf):** [Overleaf Link](https://www.overleaf.com/read/xxfynzkgwqfg#d5ee71)]
 
 ##  Project Status & Timeline Notice
 
